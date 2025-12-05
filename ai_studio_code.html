@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>俄罗斯方块 - 简易版</title>
+    <style>
+        body {
+            background-color: #202028;
+            color: #fff;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        #game-container {
+            position: relative;
+            border: 2px solid #333;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        canvas {
+            display: block;
+            background-color: #000;
+        }
+
+        #score-board {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="score-board">分数: <span id="score">0</span></div>
+    
+    <div id="game-container">
+        <canvas id="tetris" width="240" height="400"></canvas>
+    </div>
+
+    <div class="controls">
+        操作: ⬅️ ➡️ 移动 | ⬆️ 旋转 | ⬇️ 加速
+    </div>
+
+<script>
+const canvas = document.getElementById('tetris');
+const context = canvas.getContext('2d');
+
+context.scale(20, 20); // 放大20倍，这样1个单位就是20像素
+
+// 定义方块形状
+const SHAPES = [
+    [
+        [0, 0, 0],
+        [1, 1, 1],
+        [0, 1, 0],
+    ], // T
+    [
+        [2, 2],
+        [2, 2],
+    ], // O
+    [
+        [0, 3, 3],
+        [3, 3, 0],
+        [0, 0, 0],
+    ], // S
+    [
+        [4, 4, 0],
+        [0, 4, 4],
+        [0, 0, 0],
+    ], // Z
+    [
+        [0, 5, 0],
+        [0, 5, 0],
+        [0, 5, 5],
+    ], // J
+    [
+        [0, 6, 0],
+        [0, 6, 0],
+        [6, 6, 0],
+    ], // L
+    [
+        [0, 7, 0, 0],
+        [0, 7, 0, 0],
+        [0, 7, 0, 0],
+        [0, 7, 0, 0],
+    ], // I
+];
+
+// 定义颜色
+const COLORS = [
+    null,
+    '#FF0D72', // T - 紫红
+    '#0DC2FF', // O - 蓝
+    '#0DFF72', // S - 绿
+    '#F538FF', // Z - 粉
+    '#FF8E0D', // J - 橙
+    '#FFE138', // L - 黄
+    '#3877FF', // I - 蓝
+];
+
+// 游戏状态
+const arena = createMatrix(12, 20); // 宽12（算上墙壁的话，实际显示10），高20
+const player = {
+    pos: {x: 0, y: 0},
+    matrix: null,
+    score: 0,
+};
+
+// 创建矩阵
+function createMatrix(w, h) {
+    const matrix = [];
+    while (h--) {
+        matrix.push(new Array(w).fill(0));
+    }
+    return matrix;
+}
+
+// 碰撞检测
+function collide(arena, player) {
+    const [m, o] = [player.matrix, player.pos];
+    for (let y = 0; y < m.length; ++y) {
+        for (let x = 0; x < m[y].length; ++x) {
+            if (m[y][x] !== 0 &&
+               (arena[y + o.y] && arena[y + o.y][x + o.x]) !== 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// 绘制函数
+function draw() {
+    // 清空背景
+    context.fillStyle = '#000';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    drawMatrix(arena, {x: 0, y: 0});
+    drawMatrix(player.matrix, player.pos);
+}
+
+// 绘制矩阵（方块或场地）
+function drawMatrix(matrix, offset) {
+    matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+            if (value !== 0) {
+                context.fillStyle = COLORS[value];
+                context.fillRect(x + offset.x, y + offset.y, 1, 1);
+                
+                // 给方块加点边框效果
+                context.lineWidth = 0.05;
+                context.strokeStyle = 'white';
+                context.strokeRect(x + offset.x, y + offset.y, 1, 1);
+            }
+        });
+    });
+}
+
+// 合并方块到场地
+function merge(arena, player) {
+    player.matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+            if (value !== 0) {
+                arena[y + player.pos.y][x + player.pos.x] = value;
+            }
+        });
+    });
+}
+
+// 旋转矩阵
+function rotate(matrix, dir) {
+    for (let y = 0; y < matrix.length; ++y) {
+        for (let x = 0; x < y; ++x) {
+            [
+                matrix[x][y],
+                matrix[y][x],
+            ] = [
+                matrix[y][x],
+                matrix[x][y],
+            ];
+        }
+    }
+    if (dir > 0) {
+        matrix.forEach(row => row.reverse());
+    } else {
+        matrix.reverse();
+    }
+}
+
+// 玩家下落
+function playerDrop() {
+    player.pos.y++;
+    if (collide(arena, player)) {
+        player.pos.y--;
+        merge(arena, player);
+        playerReset();
+        arenaSweep();
+        updateScore();
+    }
+    dropCounter = 0;
+}
+
+// 玩家移动
+function playerMove(dir) {
+    player.pos.x += dir;
+    if (collide(arena, player)) {
+        player.pos.x -= dir;
+    }
+}
+
+// 重置/生成新方块
+function playerReset() {
+    const pieces = 'ILJOTSZ';
+    player.matrix = createPiece(pieces[pieces.length * Math.random() | 0]);
+    player.pos.y = 0;
+    player.pos.x = (arena[0].length / 2 | 0) - (player.matrix[0].length / 2 | 0);
+    
+    // 如果生成即碰撞，游戏结束
+    if (collide(arena, player)) {
+        arena.forEach(row => row.fill(0));
+        player.score = 0;
+        updateScore();
+    }
+}
+
+// 玩家旋转
+function playerRotate(dir) {
+    const pos = player.pos.x;
+    let offset = 1;
+    rotate(player.matrix, dir);
+    // 旋转防碰撞（踢墙）
+    while (collide(arena, player)) {
+        player.pos.x += offset;
+        offset = -(offset + (offset > 0 ? 1 : -1));
+        if (offset > player.matrix[0].length) {
+            rotate(player.matrix, -dir);
+            player.pos.x = pos;
+            return;
+        }
+    }
+}
+
+// 根据字符生成形状矩阵
+function createPiece(type) {
+    if (type === 'I') {
+        return SHAPES[6];
+    } else if (type === 'L') {
+        return SHAPES[5];
+    } else if (type === 'J') {
+        return SHAPES[4];
+    } else if (type === 'O') {
+        return SHAPES[1];
+    } else if (type === 'Z') {
+        return SHAPES[3];
+    } else if (type === 'S') {
+        return SHAPES[2];
+    } else if (type === 'T') {
+        return SHAPES[0];
+    }
+}
+
+// 消除行
+function arenaSweep() {
+    let rowCount = 1;
+    outer: for (let y = arena.length -1; y > 0; --y) {
+        for (let x = 0; x < arena[y].length; ++x) {
+            if (arena[y][x] === 0) {
+                continue outer;
+            }
+        }
+        
+        const row = arena.splice(y, 1)[0].fill(0);
+        arena.unshift(row);
+        ++y;
+        
+        player.score += rowCount * 10;
+        rowCount *= 2;
+    }
+}
+
+// 更新分数UI
+function updateScore() {
+    document.getElementById('score').innerText = player.score;
+}
+
+// 游戏主循环
+let dropCounter = 0;
+let dropInterval = 1000; // 1秒下落一次
+let lastTime = 0;
+
+function update(time = 0) {
+    const deltaTime = time - lastTime;
+    lastTime = time;
+
+    dropCounter += deltaTime;
+    if (dropCounter > dropInterval) {
+        playerDrop();
+    }
+
+    draw();
+    requestAnimationFrame(update);
+}
+
+// 键盘监听
+document.addEventListener('keydown', event => {
+    if (event.keyCode === 37) { // Left
+        playerMove(-1);
+    } else if (event.keyCode === 39) { // Right
+        playerMove(1);
+    } else if (event.keyCode === 40) { // Down
+        playerDrop();
+    } else if (event.keyCode === 38) { // Up (Rotate)
+        playerRotate(1);
+    }
+});
+
+// 开始游戏
+playerReset();
+updateScore();
+update();
+
+</script>
+</body>
+</html>
